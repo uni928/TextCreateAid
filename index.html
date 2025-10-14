@@ -189,8 +189,26 @@
   function captureCaret(){ caret.start = writer.selectionStart; caret.end = writer.selectionEnd; }
 
   function replaceRange(start, end, str){
-    writer.setRangeText(str, start, end, 'end');
+    // フォーカスを先に当てて選択範囲を反映（Undoスタックに載せるため）
     writer.focus();
+    writer.setSelectionRange(start, end);
+
+    // 可能なら execCommand('insertText') を使って OS ネイティブの Undo に統合
+    let usedExec = false;
+    try {
+      // 一部ブラウザでは queryCommandSupported が未実装のことがあるので try/catch
+      if (document.queryCommandSupported && document.queryCommandSupported('insertText')){
+        usedExec = document.execCommand('insertText', false, str);
+      }
+    } catch (_) { /* no-op */ }
+
+    // フォールバック：setRangeText（こちらも Undo 対応。フォーカス済みが重要）
+    if (!usedExec){
+      writer.setRangeText(str, writer.selectionStart, writer.selectionEnd, 'end');
+      // 入力イベントを発火（自動保存などのリスナー向け）
+      try { writer.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'insertFromPaste', data:str })); } catch(_){}
+    }
+
     captureCaret();
     triggerAutoSave();
   }
@@ -303,7 +321,7 @@
     let bestKey = null;
     for (const k of keyIndex.keys()) if (k && before.endsWith(k)) bestKey = !bestKey || k.length>bestKey.length ? k : bestKey;
     if (bestKey){ e.preventDefault(); replaceRange(start-bestKey.length, start, keyIndex.get(bestKey)); return; }
-    e.preventDefault(); replaceRange(start, end, '\t');
+    e.preventDefault(); replaceRange(start, end, '	');
   }
 
   // ===== イベント =====
@@ -341,11 +359,18 @@
     setStatus('待機中');
 
     if (!writer.value){
-      writer.value = 'ここに文章を入力してください。\n\n— ヒント —\n・辞書の項目クリックで貼り付け、長押しで削除ボタン。\n・Tabでキー→値に展開。\n・内容は自動保存されます（IndexedDB）。\n';
+      writer.value = `ここに文章を入力してください。
+
+— ヒント —
+・辞書の項目クリックで貼り付け、長押しで削除ボタン。
+・Tabでキー→値に展開。
+・内容は自動保存されます（IndexedDB）。
+`;
       triggerAutoSave();
     }
     if (dict.length === 0){
-      await addDict('挨拶', 'お世話になっております。\n一般社団法人ダイアロゴスの松原です。');
+      await addDict('挨拶', `お世話になっております。
+一般社団法人ダイアロゴスの松原です。`);
       await addDict('締め', 'お手数ですがご確認のほど、よろしくお願いいたします。');
       await addDict('たな', '田中太郎');
       await addDict('すず', '鈴木次郎');
