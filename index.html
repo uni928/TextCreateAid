@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文章作成エディタ｜辞書＆IndexedDB自動保存</title>
+  <style>
+    :root {
+      --bg: #0f172a; /* slate-900 */
+      --panel: #111827ee; /* gray-900 */
+      --card: #0b1222; /* custom deep */
+      --text: #e5e7eb; /* gray-200 */
+      --muted: #9ca3af; /* gray-400 */
+      --accent: #60a5fa; /* blue-400 */
+      --border: #243244; /* slate-700 */
+      --warn: #f59e0b; /* amber-500 */
+      --danger: #ef4444; /* red-500 */
+      --ok: #34d399; /* emerald-400 */
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, var(--bg), #0b1222 40%, #0b1222 100%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "Yu Gothic", "Meiryo", sans-serif;
+    }
+    .container { max-width: 1100px; margin: 20px auto; padding: 16px; }
+    .row { display: grid; gap: 14px; }
+    @media (min-width: 900px){ .row { grid-template-columns: 1fr; } }
+
+    /* Card */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+    .card-header { display:flex; align-items:center; justify-content:space-between; padding: 12px 14px; border-bottom:1px solid var(--border); }
+    .card-header h2 { margin:0; font-size: 16px; font-weight: 700; letter-spacing: .02em; }
+    .card-body { padding: 12px; }
+
+    /* Toolbar */
+    .toolbar { display:flex; flex-wrap: wrap; gap: 8px; align-items:flex-start; }
+    .toolbar input, .toolbar textarea { background:#0f172a; color:var(--text); border:1px solid var(--border); border-radius: 10px; padding:8px 10px; }
+    .toolbar input { width: 200px; }
+    .toolbar textarea { width: min(100%, 520px); height: 70px; resize: vertical; }
+
+    .btn { cursor:pointer; border:1px solid var(--border); background:#0f172a; color:var(--text); padding:8px 12px; border-radius: 999px; font-weight:600; transition:.15s ease; }
+    .btn:hover { transform: translateY(-1px); border-color:#375278; }
+    .btn:active { transform: translateY(0); }
+    .btn.primary { background: linear-gradient(180deg, #1f3b64, #162846); border-color:#2c4a73; }
+    .btn.ok { background: linear-gradient(180deg, #0f3f32, #0a2c23); border-color:#144d3e; }
+    .btn.warn { background: linear-gradient(180deg, #513a06, #3a2a04); border-color:#6b4e0b; }
+    .btn.danger { background: linear-gradient(180deg, #521111, #3b0d0d); border-color:#6b1a1a; }
+    .btn.ghost { background: transparent; }
+    .btn.small { padding:6px 10px; font-size: 12px; }
+    .spacer { flex:1; }
+
+    /* Dictionary Grid (5 columns on desktop) */
+    .dict-grid { 
+      display: grid; 
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 10px; 
+      margin-top: 12px;
+    }
+    @media (min-width: 560px){ .dict-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+    @media (min-width: 780px){ .dict-grid { grid-template-columns: repeat(4, minmax(0,1fr)); } }
+    @media (min-width: 980px){ .dict-grid { grid-template-columns: repeat(5, minmax(0,1fr)); } }
+
+    .tile { position: relative; }
+    .tile-btn { 
+      width: 100%; text-align: left; cursor: pointer; border:1px solid var(--border); 
+      background: #0f172a; color: var(--text); border-radius: 12px; padding:10px 12px; 
+      display:flex; flex-direction: column; gap:6px; min-height: 72px; transition: .12s ease; 
+    }
+    .tile-btn:hover { border-color:#375278; transform: translateY(-1px); }
+    .tile-key { font-weight:700; font-size: 13px; color:#cfe0ff; letter-spacing:.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .tile-val { font-size: 12px; color:#d6dbe3; max-height: 3.2em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+
+    .tile-del { 
+      position:absolute; top:6px; right:6px; display:none; 
+      border:1px solid var(--border); background:#3b0d0d; color:#fff; 
+      padding:4px 8px; border-radius: 999px; font-size:12px; 
+    }
+    .tile.show-del .tile-del { display:inline-block; }
+
+    /* Writer */
+    .editor-card .card-header { position: sticky; top: 0; z-index: 5; backdrop-filter: blur(6px); background: linear-gradient(180deg, #0b1222e6, #0b1222a0); }
+    #writer { width:100%; height: 48vh; min-height: 320px; resize: vertical; padding: 14px 16px; line-height: 1.8; font-size: 16px; background:#0a1220; color:var(--text); border-radius: 14px; border:1px solid var(--border); outline: none; }
+
+    .muted { color: var(--muted); font-size: 12px; }
+    .chip { display:inline-flex; align-items:center; gap:6px; padding: 6px 10px; border-radius: 999px; background:#0f172a; border:1px solid var(--border); color:#c9d3df; font-size: 12px; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b1222; border:1px solid var(--border); padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="row">
+
+      <!-- Dictionary Panel -->
+      <section class="card">
+        <div class="card-header">
+          <h2>辞書欄（テンプレ / 定型文 / 語句）</h2>
+          <div class="muted">クリックで貼り付け／長押しで削除ボタンを表示（他の操作で非表示）</div>
+        </div>
+        <div class="card-body">
+          <div class="toolbar" id="toolbar">
+            <input id="newKey" type="text" placeholder="キー名（例：挨拶）" />
+            <textarea id="newVal" placeholder="本文（貼り付けられる内容）"></textarea>
+            <button class="btn primary" id="addBtn">追加</button>
+            <span class="spacer"></span>
+            <span class="chip">保存：<strong id="saveStatus">待機中</strong></span>
+          </div>
+
+          <div id="dictGrid" class="dict-grid" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- Writer Panel -->
+      <section class="card editor-card">
+        <div class="card-header">
+          <h2>入力欄</h2>
+          <div class="muted">内容はリアルタイムで <span class="kbd">IndexedDB</span> に保存されます。</div>
+        </div>
+        <div class="card-body">
+          <textarea id="writer" placeholder="ここに文章を入力…"></textarea>
+          <div class="muted" style="margin-top:8px">ヒント：辞書の項目をクリックすると、カーソル位置（選択中の範囲は置換）に挿入されます。Tab でもキー→値に展開できます。</div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== IndexedDB ラッパー =====
+  const DB_NAME = 'writerDB_v1';
+  const STORE_TEXT = 'text';
+  const STORE_DICT = 'dict';
+
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = (e) => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE_TEXT)) {
+          db.createObjectStore(STORE_TEXT, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_DICT)) {
+          db.createObjectStore(STORE_DICT, { keyPath: 'id', autoIncrement: true });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function withStore(storeName, mode, fn) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, mode);
+      const store = tx.objectStore(storeName);
+
+      let reqResult;
+      const ret = fn(store);
+      if (ret && typeof ret === 'object' && 'onsuccess' in ret && 'onerror' in ret) {
+        ret.onsuccess = () => { reqResult = ret.result; };
+        ret.onerror = () => { reject(ret.error); };
+      }
+      tx.oncomplete = () => resolve(reqResult !== undefined ? reqResult : ret);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  
+  // ===== 状態 =====
+  let caret = { start: 0, end: 0 }; // 貼り付け用
+  let dict = []; // {id, key, val}
+  let keyIndex = new Map(); // key -> value
+  let longPressTarget = null; // 表示中の削除ターゲット id
+
+  // ===== 要素 =====
+  const writer = document.getElementById('writer');
+  const dictGrid = document.getElementById('dictGrid');
+  const newKey = document.getElementById('newKey');
+  const newVal = document.getElementById('newVal');
+  const addBtn = document.getElementById('addBtn');
+  const saveStatus = document.getElementById('saveStatus');
+
+  // ===== ユーティリティ =====
+  const debounce = (fn, ms) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+  function setStatus(text, ok=false){ saveStatus.textContent = text; saveStatus.style.color = ok ? 'var(--ok)' : 'var(--muted)'; }
+  function captureCaret(){ caret.start = writer.selectionStart; caret.end = writer.selectionEnd; }
+
+  function replaceRange(start, end, str){
+    writer.setRangeText(str, start, end, 'end');
+    writer.focus();
+    captureCaret();
+    triggerAutoSave();
+  }
+  function insertAtCaret(str){ const s = caret.start ?? writer.selectionStart; const e = caret.end ?? writer.selectionEnd; replaceRange(s, e, str); }
+
+  function rebuildKeyIndex(){
+    keyIndex = new Map();
+    for (const d of dict){ if (d?.key) keyIndex.set(d.key, d.val ?? ''); }
+  }
+
+  function resetDeleteMode(){
+    longPressTarget = null;
+    for (const node of dictGrid.querySelectorAll('.tile')) node.classList.remove('show-del');
+  }
+
+  // ===== レンダリング =====
+  function renderDict(){
+    dictGrid.innerHTML = '';
+    dict.forEach((item) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'tile';
+      wrap.dataset.id = item.id;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tile-btn';
+      btn.innerHTML = `<div class="tile-key"></div><div class="tile-val"></div>`;
+      btn.querySelector('.tile-key').textContent = item.key || '(無題)';
+      btn.querySelector('.tile-val').textContent = item.val || '';
+
+      // クリックで貼り付け
+      btn.addEventListener('click', () => {
+        insertAtCaret(item.val || '');
+        resetDeleteMode();
+      });
+
+      // 長押しで削除ボタン表示（マウス/タッチ両対応）
+      let pressTimer = null;
+      const startPress = () => {
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+          resetDeleteMode();
+          longPressTarget = item.id;
+          wrap.classList.add('show-del');
+        }, 500);
+      };
+      const cancelPress = () => { clearTimeout(pressTimer); };
+      btn.addEventListener('pointerdown', startPress);
+      btn.addEventListener('pointerup', cancelPress);
+      btn.addEventListener('pointerleave', cancelPress);
+      btn.addEventListener('pointercancel', cancelPress);
+
+      // 削除ボタン
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'tile-del';
+      del.textContent = '削除';
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await removeDict(item.id);
+        resetDeleteMode();
+      });
+
+      wrap.append(btn, del);
+      dictGrid.appendChild(wrap);
+    });
+  }
+
+  // ===== 辞書：CRUD =====
+  async function loadDict(){
+    const rows = await withStore(STORE_DICT, 'readonly', store => store.getAll());
+    dict = rows || [];
+    rebuildKeyIndex();
+    renderDict();
+  }
+  async function addDict(key, val){
+    const toAdd = { key: (key||'').trim(), val: val||'' };
+    await withStore(STORE_DICT, 'readwrite', s => s.add(toAdd)).then(()=>setStatus('辞書 保存済', true));
+    await loadDict();
+  }
+  async function updateDict(item){
+    await withStore(STORE_DICT, 'readwrite', s => s.put(item)).then(()=>setStatus('辞書 更新済', true));
+    await loadDict();
+  }
+  async function removeDict(id){
+    await withStore(STORE_DICT, 'readwrite', s => s.delete(id)).then(()=>setStatus('辞書 削除', true));
+    await loadDict();
+  }
+
+  // ===== テキスト：自動保存 =====
+  const autoSave = debounce(async () => {
+    const content = writer.value;
+    await withStore(STORE_TEXT, 'readwrite', s => s.put({ id: 'main', content, updatedAt: Date.now() }));
+    setStatus('本文 自動保存', true);
+  }, 400);
+  function triggerAutoSave(){ autoSave(); }
+  async function loadText(){
+    const row = await withStore(STORE_TEXT, 'readonly', s => s.get('main'));
+    if (row && typeof row.content === 'string') writer.value = row.content;
+  }
+
+  // ===== Tabキー：左側のキーを値に展開 =====
+  function expandLeftKeyOrInsertTab(e){
+    const start = writer.selectionStart, end = writer.selectionEnd, v = writer.value;
+    if (start !== end){
+      const sel = v.slice(start, end);
+      if (keyIndex.has(sel)){ e.preventDefault(); replaceRange(start, end, keyIndex.get(sel)); return; }
+    }
+    const before = v.slice(0, start);
+    let bestKey = null;
+    for (const k of keyIndex.keys()) if (k && before.endsWith(k)) bestKey = !bestKey || k.length>bestKey.length ? k : bestKey;
+    if (bestKey){ e.preventDefault(); replaceRange(start-bestKey.length, start, keyIndex.get(bestKey)); return; }
+    e.preventDefault(); replaceRange(start, end, '\t');
+  }
+
+  // ===== イベント =====
+  addBtn.addEventListener('click', async () => {
+    if (!newKey.value.trim() && !newVal.value.trim()) return;
+    await addDict(newKey.value, newVal.value);
+    newKey.value = ''; newVal.value = ''; newKey.focus();
+  });
+
+  writer.addEventListener('input', triggerAutoSave);
+  writer.addEventListener('keyup', captureCaret);
+  writer.addEventListener('click', captureCaret);
+  writer.addEventListener('focus', captureCaret);
+  writer.addEventListener('keydown', (e) => { if (e.key==='Tab' && !e.shiftKey) expandLeftKeyOrInsertTab(e); });
+
+  // 他の操作で削除ボタンを消す
+  document.addEventListener('click', (e) => {
+    const tile = e.target.closest?.('.tile');
+    if (!tile) resetDeleteMode();
+  });
+
+  // ショートカット: Ctrl/Cmd+S で保存
+  window.addEventListener('keydown', async (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){
+      e.preventDefault();
+      await withStore(STORE_TEXT, 'readwrite', s => s.put({ id: 'main', content: writer.value, updatedAt: Date.now() }));
+      setStatus('本文 保存済（ショートカット）', true);
+    }
+  });
+
+  // 初期化
+  (async function init(){
+    setStatus('読み込み中…');
+    await Promise.all([loadText(), loadDict()]);
+    setStatus('待機中');
+
+    if (!writer.value){
+      writer.value = 'ここに文章を入力してください。\n\n— ヒント —\n・辞書の項目クリックで貼り付け、長押しで削除ボタン。\n・Tabでキー→値に展開。\n・内容は自動保存されます（IndexedDB）。\n';
+      triggerAutoSave();
+    }
+    if (dict.length === 0){
+      await addDict('挨拶', 'お世話になっております。\n一般社団法人ダイアロゴスの松原です。');
+      await addDict('締め', 'お手数ですがご確認のほど、よろしくお願いいたします。');
+    }
+  })();
+})();
+</script>
+</body>
+</html>
