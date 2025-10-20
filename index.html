@@ -342,26 +342,65 @@ writer.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Enter: 自動インデント
+  // Enter: 自動インデント＋閉じタグ自動挿入（閉じタグ時は+1インデント）
   if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     const start = writer.selectionStart;
     const end = writer.selectionEnd;
     const v = writer.value;
 
-    // 現在行の開始位置を取得
+    // 現在行の開始位置と内容
     const lineStart = v.lastIndexOf('\n', start - 1) + 1;
     const line = v.slice(lineStart, start);
 
-    // 行頭のタブ数を数える
+    // 行頭タブ数
     const m = line.match(/^(\t*)/);
     const tabCount = m ? m[1].length : 0;
 
-    // { で終わる場合はタブを1つ増やす
+    // { で終わるならインデント+1（} で減らす処理はしない）
     const endsWithBrace = /{\s*$/.test(line);
-    const insert = '\n' + '\t'.repeat(tabCount + (endsWithBrace ? 1 : 0));
+    let baseIndentCount = tabCount + (endsWithBrace ? 1 : 0);
+
+    // HTML閉じタグ自動挿入判定
+    const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+    const tagMatch = line.match(/<([A-Za-z][A-Za-z0-9:-]*)\b[^>]*>$/);
+    const isSelfClosing = /\/>\s*$/.test(line);
+    const isClosingTagLine = /<\/\s*[A-Za-z]/.test(line);
+    const shouldAutoClose =
+      />\s*$/.test(line) && line.includes('<') &&
+      tagMatch && !isSelfClosing && !isClosingTagLine &&
+      !voidTags.has(tagMatch[1].toLowerCase());
+
+    // 自動閉じタグならインデント+1
+    if (shouldAutoClose) baseIndentCount++;
+
+    // 挿入文字列（閉じタグは次の行・元のインデントで）
+    const baseIndent = '\t'.repeat(baseIndentCount);
+    const baseInsert = '\n' + baseIndent;
+    const closingPart = shouldAutoClose ? ('\n' + '\t'.repeat(tabCount) + `</${tagMatch[1]}>`) : '';
+    const toInsert = baseInsert + closingPart;
 
     e.preventDefault();
-    replaceRange(start, end, insert);
+
+    // 挿入処理
+    writer.focus();
+    writer.setSelectionRange(start, end);
+    let usedExec = false;
+    try {
+      if (document.queryCommandSupported && document.queryCommandSupported('insertText')) {
+        usedExec = document.execCommand('insertText', false, toInsert);
+      }
+    } catch (_) {}
+    if (!usedExec) {
+      writer.setRangeText(toInsert, start, end, 'end');
+      try { writer.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'insertLineBreak' })); } catch(_) {}
+    }
+
+    // カーソルは閉じタグを入れる「前」の位置へ戻す
+    const caretPos = start + baseInsert.length;
+    writer.setSelectionRange(caretPos, caretPos);
+
+    captureCaret();
+    triggerAutoSave();
     return;
   }
 });
@@ -413,4 +452,3 @@ writer.addEventListener('keydown', (e) => {
 </script>
 </body>
 </html>
-
