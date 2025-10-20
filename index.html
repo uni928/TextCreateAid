@@ -335,7 +335,37 @@
   writer.addEventListener('keyup', captureCaret);
   writer.addEventListener('click', captureCaret);
   writer.addEventListener('focus', captureCaret);
-  writer.addEventListener('keydown', (e) => { if (e.key==='Tab' && !e.shiftKey) expandLeftKeyOrInsertTab(e); });
+writer.addEventListener('keydown', (e) => {
+  // Tab: キー→値展開
+  if (e.key === 'Tab' && !e.shiftKey) {
+    expandLeftKeyOrInsertTab(e);
+    return;
+  }
+
+  // Enter: 自動インデント
+  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const start = writer.selectionStart;
+    const end = writer.selectionEnd;
+    const v = writer.value;
+
+    // 現在行の開始位置を取得
+    const lineStart = v.lastIndexOf('\n', start - 1) + 1;
+    const line = v.slice(lineStart, start);
+
+    // 行頭のタブ数を数える
+    const m = line.match(/^(\t*)/);
+    const tabCount = m ? m[1].length : 0;
+
+    // { で終わる場合はタブを1つ増やす
+    const endsWithBrace = /{\s*$/.test(line);
+    const insert = '\n' + '\t'.repeat(tabCount + (endsWithBrace ? 1 : 0));
+
+    e.preventDefault();
+    replaceRange(start, end, insert);
+    return;
+  }
+});
+
 
   // 他の操作で削除ボタンを消す
   document.addEventListener('click', (e) => {
@@ -372,10 +402,6 @@
       await addDict('挨拶', `お世話になっております。
 一般社団法人ダイアロゴスの松原です。`);
       await addDict('締め', 'お手数ですがご確認のほど、よろしくお願いいたします。');
-      await addDict('たな', '田中太郎');
-      await addDict('すず', '鈴木次郎');
-      await addDict('div',`<div class=""></div>`);
-      await addDict('textarea', `<textarea id="" class="" placeholder=""></textarea>`);
     }
   })();
 })();
